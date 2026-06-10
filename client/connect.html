@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>  
+    <title>Mooz</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <script>
+        let ws = "ws://localhost:3000"
+        let pingInterval;
+        let websocket = new WebSocket(ws)
+        let counter = 0;
+
+
+        websocket.addEventListener("open", ()=>{
+            console.log("connection open")
+        })
+
+
+        function createRoom(){
+
+
+            clearInterval(pingInterval)
+
+            pingInterval = setInterval(()=>{
+                counter++;
+                console.log(`SENT: ping: ${counter}`);
+                websocket.send(` ping ${counter}   `);
+            },1000)
+        }
+
+</script>
+
+    <header class="top-bar">
+        <h1><span class="logo-m">M</span>ooz</h1>
+    </header>
+
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);">
+        <button onclick="createRoom()" class="btn">Create</button>
+        <button onclick="joinRoom()" class="btn">Join Call</button>
+
+    </div>
+</body>
+</html>

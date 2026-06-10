@@ -1,0 +1,120 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid #ddd;
+    background: #fff;
+}
+
+.logo-m {
+    color: blue;
+}
+
+.participants {
+    font-size: 14px;
+    color: #555;
+}
+
+.main-container {
+    display: flex;
+    height: calc(100vh - 60px);
+}
+
+.videos-container {
+    flex: 3;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+}
+
+video {
+    flex: 1;
+    width: 100%;
+    background: #111;
+}
+
+.controls-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #f5f7fa;
+    border-top: 1px solid #ddd;
+}
+
+.left-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.btn {
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #1f1f1f;
+    color: white;
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+    transition: 0.2s;
+}
+
+.btn:hover {
+    background: #333;
+}
+
+/* RED LEAVE BUTTON */
+.leave {
+    background: #e74c3c;
+}
+
+.leave:hover {
+    background: #c0392b;
+}
+
+/* CHAT */
+.chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #ddd;
+    background: #fafafa;
+}
+
+.chat-header {
+    padding: 12px;
+    border-bottom: 1px solid #ddd;
+    background: white;
+}
+
+.chat-messages {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.chat-input {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #ddd;
+    gap: 8px;
+    background: white;
+}
+
+.chat-input input {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+}
+
+.chat-input button {
+    border: none;
+}
