@@ -6,40 +6,42 @@
 </head>
 
 <body>
-    <script>
-        let ws = "ws://localhost:3000"
-        let pingInterval;
-        let websocket = new WebSocket(ws)
-        let counter = 0;
-
-
-        websocket.addEventListener("open", ()=>{
-            console.log("connection open")
-        })
-
-
-        function createRoom(){
-
-
-            clearInterval(pingInterval)
-
-            pingInterval = setInterval(()=>{
-                counter++;
-                console.log(`SENT: ping: ${counter}`);
-                websocket.send(` ping ${counter}   `);
-            },1000)
-        }
-
-</script>
-
     <header class="top-bar">
         <h1><span class="logo-m">M</span>ooz</h1>
     </header>
-
     <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);">
-        <button onclick="createRoom()" class="btn">Create</button>
-        <button onclick="joinRoom()" class="btn">Join Call</button>
+                <form onsubmit="setRole()" action="">
+                    <input required style="display: block; width: 30vw; margin:10px;" placeholder="Enter your name before clicking join" id="input" type="text">
+                    <button type="submit" class="btn">Create</button>
+                    <button type="submit" class="btn">Join Call</button>
+                </form>
 
     </div>
+
+    <script>
+        
+        let userId = crypto.randomUUID()
+        let role = null;
+
+        const myInput = document.getElementById('input');
+
+        
+
+        function setRole(){
+            event.preventDefault()
+            if ( myInput.value == "Kagos123"){
+                localStorage.setItem("user", userId)
+                localStorage.setItem("role", "admin");
+                window.location.href = "./index.html"
+            }
+            else {
+                localStorage.setItem("user", userId)
+                localStorage.setItem("role", "client")
+                 window.location.href = "./index.html"
+            }
+        }
+        
+</script>
+
 </body>
 </html>

@@ -1,48 +1,48 @@
 <!DOCTYPE html>
 <html>
-<head>  
-    <title>Mooz</title>
-    <link rel="stylesheet" href="style.css" />
+<head>
+  <title>Mooz</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-    <header class="top-bar">
-        <h1><span class="logo-m">M</span>ooz</h1>
-        <span class="participants">0 Participants</span>
-    </header>
+  <header class="top-bar">
+    <h1><span class="logo-m">H</span>icon-video-conferenceing</h1>
+    <span class="participants" id="participantCount">0 Participants</span>
+  </header>
 
-    <div class="main-container">
+  <div class="main-container">
+    <div class="videos-container" id="video_container">
 
-        <div class="videos-container">
-            <video></video>
+      <div class="video-wrapper" id="wrapper-local">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <span class="video-label">You</span>
+      </div>
 
-            <div class="controls-container">
-                <div class="left-controls">
-                    <span class="btn">Audio: <b>On</b></span>
-                    <span class="btn">Video: <b>On</b></span>
-                    <span class="btn">Present</span>
-                    <span class="btn">Chat</span>
-                </div>
+      <div id="videoGrid"></div>
 
-                <span class="btn leave">Leave</span>
-            </div>
+      <div class="controls-container">
+        <div class="left-controls">
+          <span class="btn" id="audioBtn">Audio: <b>On</b></span>
+          <span class="btn" id="videoBtn">Video: <b>On</b></span>
+          <span class="btn">Present</span>
+          <span class="btn" id="chatToggle">Chat</span>
         </div>
-
-        <div class="chat-container">
-            <div class="chat-header">
-                <b>Chat</b>
-            </div>
-
-            <div class="chat-messages">
-                <div><b>Name:</b> Message</div>
-            </div>
-
-            <div class="chat-input">
-                <input type="text" placeholder="Type your message"/>
-                <button class="btn">Send</button>
-            </div>
-        </div>
-
+        <span class="btn leave" id="leaveBtn">Leave</span>
+      </div>
     </div>
+
+    <div class="chat-container" id="chatContainer">
+      <div class="chat-header"><b>Chat</b></div>
+      <div class="chat-messages" id="chatMessages">
+        <div><b>Name:</b> Message</div>
+      </div>
+      <div class="chat-input">
+        <input type="text" id="chatInput" placeholder="Type your message" />
+        <button class="btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="index.js"></script>
 </body>
 </html>
