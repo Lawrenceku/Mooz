@@ -109,7 +109,6 @@
 
 // app.listen(3000, () => console.log("Server live on 3000"));
 
-
 const express = require("express");
 const http = require("http");
 const { randomUUID } = require("crypto");
@@ -145,30 +144,33 @@ app.ws("/ws", function (ws, req) {
 
     console.log("msg:", data.type, "from:", ws.id);
 
-    // register 
+    // register
     if (data.type === "register") {
       ws.id = data.id;
       ws.role = data.role;
+      ws.name = data.name || "User"; // store name on socket
       users.set(ws.id, ws);
 
       if (ws.role === "admin") {
         admin = ws.id;
         console.log("registered admin:", ws.id);
       } else {
-        console.log("registered client:", ws.id, "| total users:", users.size);
+        console.log("registered client:", ws.id, ws.name, "| total users:", users.size);
       }
       return;
     }
 
-    // client ready: tell admin
+    // client ready: tell admin (forward name so admin can label the tile)
     if (data.type === "client_ready") {
+      ws.name = data.name || ws.name || "User"; // update name if provided
       const adminSocket = users.get(admin);
       if (adminSocket) {
         adminSocket.send(JSON.stringify({
           type: "client_ready",
-          clientId: ws.id
+          clientId: ws.id,
+          name: ws.name  // forwarded so admin can set video label before ontrack fires
         }));
-        console.log("notified admin: client ready", ws.id);
+        console.log("notified admin: client ready", ws.id, ws.name);
       } else {
         // No admin yet — tell the client
         ws.send(JSON.stringify({ type: "error", message: "No admin in room yet" }));

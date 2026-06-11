@@ -32,11 +32,13 @@
             if ( myInput.value == "Kagos123"){
                 localStorage.setItem("user", userId)
                 localStorage.setItem("role", "admin");
+                localStorage.setItem("name", "Hicon Resources")
                 window.location.href = "./index.html"
             }
             else {
                 localStorage.setItem("user", userId)
                 localStorage.setItem("role", "client")
+                localStorage.setItem("name", myInput.value)
                  window.location.href = "./index.html"
             }
         }

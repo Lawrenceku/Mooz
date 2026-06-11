@@ -137,16 +137,31 @@ const userName = localStorage.getItem("name") || "User";
 // Admin: one RTCPeerConnection per client { clientId -> pc }
 const peerConnections = new Map();
 const remoteStreams = new Map();
+const clientNames = new Map(); // clientId -> display name
 
 // Client: single pc to admin
 let pc = null;
 let localStream = null;
-let currentClientId = null;
 
 let audioEnabled = true;
 let videoEnabled = true;
 
-// ─── VIDEO GRID ───────────────────────────────────────────────────────────────
+// ICE config with TURN fallback for production NAT traversal
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    }
+  ]
+};
 
 function addVideoElement(clientId, stream, label) {
   if (document.getElementById(`wrapper-${clientId}`)) return;
@@ -186,12 +201,10 @@ function updateParticipantCount() {
   document.getElementById("participantCount").textContent = `${count} Participant${count !== 1 ? "s" : ""}`;
 }
 
-// ─── PEER CONNECTION FACTORY ──────────────────────────────────────────────────
+// PEER CONNECTION FACTORY
 
 function createPeerConnection(remoteId) {
-  const peer = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  });
+  const peer = new RTCPeerConnection(ICE_CONFIG);
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
@@ -203,44 +216,42 @@ function createPeerConnection(remoteId) {
     }
   };
 
+  // Unified ontrack — works for both admin (many clients) and client (sees everyone)
   peer.ontrack = (event) => {
     console.log("ontrack from", remoteId);
-
-    if (role === "admin") {
-      let stream = remoteStreams.get(remoteId);
-      if (!stream) {
-        stream = new MediaStream();
-        remoteStreams.set(remoteId, stream);
-        addVideoElement(remoteId, stream);
-      }
-      event.streams[0].getTracks().forEach(track => stream.addTrack(track));
-    } else {
-      // Client sees admin's stream in remoteVideo
-      const video = document.getElementById("remoteVideo");
-      if (video) {
-        if (!video.srcObject) video.srcObject = new MediaStream();
-        event.streams[0].getTracks().forEach(t => video.srcObject.addTrack(t));
-        video.play().catch(console.error);
-      }
+    let stream = remoteStreams.get(remoteId);
+    if (!stream) {
+      stream = new MediaStream();
+      remoteStreams.set(remoteId, stream);
+      // Admin sees client names; client sees "Host" for admin, username for peers
+      const label = remoteId === "admin"
+        ? "Host"
+        : (clientNames.get(remoteId) || remoteId.slice(0, 6));
+      addVideoElement(remoteId, stream, label);
     }
+    event.streams[0].getTracks().forEach(track => {
+      // Avoid duplicate tracks
+      if (!stream.getTracks().find(t => t.id === track.id)) {
+        stream.addTrack(track);
+      }
+    });
   };
 
   peer.onconnectionstatechange = () => {
     console.log(`peer ${remoteId}:`, peer.connectionState);
     if (["disconnected", "failed", "closed"].includes(peer.connectionState)) {
-      if (role === "admin") {
-        peer.close();
-        peerConnections.delete(remoteId);
-        remoteStreams.delete(remoteId);
-        removeVideoElement(remoteId);
-      }
+      peer.close();
+      peerConnections.delete(remoteId);
+      remoteStreams.delete(remoteId);
+      clientNames.delete(remoteId);
+      removeVideoElement(remoteId);
     }
   };
 
   return peer;
 }
 
-// ─── WEBSOCKET ────────────────────────────────────────────────────────────────
+// Websocket
 
 websocket.addEventListener("open", () => {
   websocket.send(JSON.stringify({
@@ -257,9 +268,12 @@ websocket.addEventListener("message", async (e) => {
   const data = JSON.parse(e.data);
   console.log("received:", data.type, "from:", data.from || data.clientId);
 
-  // Admin: client has tracks ready create a dedicated pc and send offer
+  // Admin: client has tracks ready — create a dedicated pc and send offer
   if (data.type === "client_ready") {
     if (role !== "admin") return;
+
+    // Store the client's name so the tile label is correct when ontrack fires
+    if (data.name) clientNames.set(data.clientId, data.name);
 
     const peer = createPeerConnection(data.clientId);
     peerConnections.set(data.clientId, peer);
@@ -324,11 +338,12 @@ websocket.addEventListener("message", async (e) => {
       peerConnections.delete(data.clientId);
     }
     remoteStreams.delete(data.clientId);
+    clientNames.delete(data.clientId);
     removeVideoElement(data.clientId);
   }
 });
 
-// ─── ADMIN ────────────────────────────────────────────────────────────────────
+// ADMIN
 
 async function setupAdmin() {
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -343,24 +358,9 @@ async function setupAdmin() {
   console.log("admin ready, waiting for clients...");
 }
 
-// ─── CLIENT ───────────────────────────────────────────────────────────────────
+// CLIENT
 
 async function joinRoom() {
-  // Client only needs one remote video tile (the admin's stream)
-  const grid = document.getElementById("videoGrid");
-  const wrapper = document.createElement("div");
-  wrapper.className = "video-wrapper";
-  const remoteVideo = document.createElement("video");
-  remoteVideo.id = "remoteVideo";
-  remoteVideo.autoplay = true;
-  remoteVideo.playsInline = true;
-  const label = document.createElement("span");
-  label.className = "video-label";
-  label.textContent = "Host";
-  wrapper.appendChild(remoteVideo);
-  wrapper.appendChild(label);
-  grid.appendChild(wrapper);
-
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
 
   const localVideo = document.getElementById("localVideo");
@@ -382,7 +382,7 @@ async function joinRoom() {
   console.log("client ready, waiting for offer...");
 }
 
-// ─── CONTROLS ────────────────────────────────────────────────────────────────
+// CONTROLS
 
 document.getElementById("audioBtn")?.addEventListener("click", () => {
   if (!localStream) return;
