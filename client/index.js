@@ -127,7 +127,7 @@
 // }
 
 
-const ws = "https://mooz-obhv.onrender.com/";
+const ws = "wss://mooz-obhv.onrender.com/ws";
 const websocket = new WebSocket(ws);
 
 const role = localStorage.getItem("role");
