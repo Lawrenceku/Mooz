@@ -110,12 +110,15 @@
 // app.listen(3000, () => console.log("Server live on 3000"));
 
 
-
 const express = require("express");
+const http = require("http");
 const { randomUUID } = require("crypto");
-const app = express();
-require("express-ws")(app);
 
+const app = express();
+const server = http.createServer(app);
+
+// attach websocket to HTTP server (important for deployment stability)
+require("express-ws")(app, server);
 let users = new Map(); // userId map to ws
 let admin = null;      // admin userId
 
@@ -124,11 +127,11 @@ app.use(function (req, res, next) {
   return next();
 });
 
-app.get("/", function (req, res, next) {
-  res.end();
+app.get("/", function (req, res) {
+  res.send('ws running');
 });
 
-app.ws("/", function (ws, req) {
+app.ws("/ws", function (ws, req) {
   ws.id = randomUUID();
 
   ws.on("message", (msg) => {
@@ -242,4 +245,8 @@ app.ws("/", function (ws, req) {
   });
 });
 
-app.listen(3000, () => console.log("Server live on 3000"));
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
