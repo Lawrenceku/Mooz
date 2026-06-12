@@ -125,7 +125,6 @@
 //     }
 //   }
 // }
-
 const ws = "wss://mooz-obhv.onrender.com/ws";
 const websocket = new WebSocket(ws);
 
@@ -141,6 +140,7 @@ let localStream = null;
 let audioEnabled = true;
 let videoEnabled = true;
 let screenStream = null;
+let screenPeerId = null;
 
 const ICE_CONFIG = {
   iceServers: [
@@ -150,7 +150,6 @@ const ICE_CONFIG = {
   ]
 };
 
-// Deterministic avatar color from a string
 const AVATAR_COLORS = ["#e74c6f","#e7a23c","#3ca9e7","#8c3ce7","#3ce76f","#e7563c","#3ce7d4"];
 function avatarColor(str) {
   let h = 0;
@@ -158,11 +157,185 @@ function avatarColor(str) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
-// VIDEO GRID
+// LAYOUT ENGINE
+// Computes tile rects so they fill the container perfectly, Zoom/Meet style.
+// In presenting mode: screen tile takes left half, participants fill right half.
+
+function layoutTiles() {
+  const area = document.getElementById("gridArea");
+  const gap = 6;
+  const pad = gap;
+  const W = area.clientWidth - pad * 2;
+  const H = area.clientHeight - pad * 2;
+
+  if (screenStream && screenPeerId) {
+    layoutPresenting(W, H, pad, gap);
+  } else {
+    layoutGrid(W, H, pad, gap);
+  }
+}
+
+function bestGrid(count, W, H) {
+  // Find cols/rows that best fills the area at 16:9 without wasting space
+  let best = { cols: 1, rows: 1, tileW: 0, tileH: 0 };
+  for (let cols = 1; cols <= count; cols++) {
+    const rows = Math.ceil(count / cols);
+    const tileW = (W - (cols - 1) * 6) / cols;
+    const tileH = tileW / (16 / 9);
+    const totalH = tileH * rows + (rows - 1) * 6;
+    if (totalH <= H) {
+      // Check if scaling up by height gives a better fit
+      const scaledH = (H - (rows - 1) * 6) / rows;
+      const scaledW = scaledH * (16 / 9);
+      const totalW = scaledW * cols + (cols - 1) * 6;
+      const usedArea = totalW <= W
+        ? scaledW * scaledH * count
+        : tileW * tileH * count;
+      if (usedArea > best.cols * best.tileW * best.tileH * best.rows) {
+        best = { cols, rows, tileW, tileH };
+      }
+    }
+  }
+  return best;
+}
+
+function layoutGrid(W, H, pad, gap) {
+  const tiles = getOrderedTiles();
+  const count = tiles.length;
+  if (!count) return;
+
+  const { cols, rows } = bestFit(count, W, H, gap);
+  const tileW = (W - (cols - 1) * gap) / cols;
+  const tileH = (H - (rows - 1) * gap) / rows;
+
+  tiles.forEach((tile, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    // Center the last incomplete row
+    const rowCount = Math.ceil(count / cols);
+    const tilesInThisRow = (row === rowCount - 1) ? count - row * cols : cols;
+    const rowOffsetX = (cols - tilesInThisRow) * (tileW + gap) / 2;
+
+    tile.style.left   = (pad + col * (tileW + gap) + rowOffsetX) + "px";
+    tile.style.top    = (pad + row * (tileH + gap)) + "px";
+    tile.style.width  = tileW + "px";
+    tile.style.height = tileH + "px";
+  });
+}
+
+function layoutPresenting(W, H, pad, gap) {
+  const screenTile = document.getElementById(`wrapper-${screenPeerId}`);
+  const participants = getOrderedTiles().filter(t => t.id !== `wrapper-${screenPeerId}`);
+  const pCount = participants.length;
+
+  if (!screenTile) return;
+
+  if (pCount === 0) {
+    // Full screen
+    screenTile.style.left   = pad + "px";
+    screenTile.style.top    = pad + "px";
+    screenTile.style.width  = W + "px";
+    screenTile.style.height = H + "px";
+    return;
+  }
+
+  const isMobile = window.innerWidth <= 768;
+
+  if (isMobile) {
+    // Top 65% screen share, bottom strip
+    const stripH = Math.min(110, H * 0.3);
+    const screenH = H - stripH - gap;
+
+    screenTile.style.left   = pad + "px";
+    screenTile.style.top    = pad + "px";
+    screenTile.style.width  = W + "px";
+    screenTile.style.height = screenH + "px";
+
+    const thumbW = (W - (pCount - 1) * gap) / pCount;
+    const thumbH = stripH;
+    participants.forEach((tile, i) => {
+      tile.style.left   = (pad + i * (thumbW + gap)) + "px";
+      tile.style.top    = (pad + screenH + gap) + "px";
+      tile.style.width  = thumbW + "px";
+      tile.style.height = thumbH + "px";
+    });
+
+  } else {
+    // Left half screen share, right strip
+    const stripW = Math.min(200, W * 0.25);
+    const screenW = W - stripW - gap;
+
+    screenTile.style.left   = pad + "px";
+    screenTile.style.top    = pad + "px";
+    screenTile.style.width  = screenW + "px";
+    screenTile.style.height = H + "px";
+
+    const thumbH = (H - (pCount - 1) * gap) / pCount;
+    const thumbW = stripW;
+    participants.forEach((tile, i) => {
+      tile.style.left   = (pad + screenW + gap) + "px";
+      tile.style.top    = (pad + i * (thumbH + gap)) + "px";
+      tile.style.width  = thumbW + "px";
+      tile.style.height = thumbH + "px";
+    });
+  }
+}
+
+// Find best cols/rows to fill W×H with `count` tiles at 16:9
+function bestFit(count, W, H, gap) {
+  let bestCols = 1, bestRows = count, bestArea = 0;
+
+  for (let cols = 1; cols <= count; cols++) {
+    const rows = Math.ceil(count / cols);
+    const tileW = (W - (cols - 1) * gap) / cols;
+    const tileH = tileW / (16 / 9);
+    const totalH = tileH * rows + (rows - 1) * gap;
+
+    if (totalH > H) continue; // doesn't fit vertically
+
+    const area = tileW * tileH * count;
+    if (area > bestArea) {
+      bestArea = area;
+      bestCols = cols;
+      bestRows = rows;
+    }
+  }
+
+  // Also try fitting by height
+  for (let rows = 1; rows <= count; rows++) {
+    const cols = Math.ceil(count / rows);
+    const tileH = (H - (rows - 1) * gap) / rows;
+    const tileW = tileH * (16 / 9);
+    const totalW = tileW * cols + (cols - 1) * gap;
+
+    if (totalW > W) continue;
+
+    const area = tileW * tileH * count;
+    if (area > bestArea) {
+      bestArea = area;
+      bestCols = cols;
+      bestRows = rows;
+    }
+  }
+
+  return { cols: bestCols, rows: bestRows };
+}
+
+function getOrderedTiles() {
+  const area = document.getElementById("gridArea");
+  return Array.from(area.querySelectorAll(".video-wrapper"));
+}
+
+// Rerun layout on resize
+const ro = new ResizeObserver(() => layoutTiles());
+ro.observe(document.getElementById("gridArea"));
+
+// VIDEO TILES
 
 function addVideoElement(peerId, stream, label) {
   if (document.getElementById(`wrapper-${peerId}`)) return;
 
+  const area = document.getElementById("gridArea");
   const wrapper = document.createElement("div");
   wrapper.id = `wrapper-${peerId}`;
   wrapper.className = "video-wrapper";
@@ -192,27 +365,16 @@ function addVideoElement(peerId, stream, label) {
   wrapper.appendChild(video);
   wrapper.appendChild(placeholder);
   wrapper.appendChild(nameTag);
+  area.appendChild(wrapper);
 
   video.play().catch(console.error);
-
-  placeInGrid(peerId, wrapper);
-  updateParticipantCount();
-}
-
-function placeInGrid(peerId, wrapper) {
-  const gridArea = document.getElementById("gridArea");
-  const strip = document.getElementById("participantStrip");
-
-  if (gridArea.classList.contains("presenting") && strip && peerId !== "screen-" + userId) {
-    strip.appendChild(wrapper);
-  } else {
-    document.getElementById("videoGrid").appendChild(wrapper);
-  }
+  layoutTiles();
 }
 
 function removeVideoElement(peerId) {
   const wrapper = document.getElementById(`wrapper-${peerId}`);
   if (wrapper) wrapper.remove();
+  layoutTiles();
   updateParticipantCount();
 }
 
@@ -222,14 +384,12 @@ function updateParticipantCount() {
     `${count} Participant${count !== 1 ? "s" : ""}`;
 }
 
-// Mark a tile cam-on or cam-off
 function setTileCamState(peerId, on) {
   const wrapper = document.getElementById(`wrapper-${peerId}`);
-  if (!wrapper) return;
-  wrapper.classList.toggle("cam-off", !on);
+  if (wrapper) wrapper.classList.toggle("cam-off", !on);
 }
 
-// PEER CONNECTION FACTORY
+// PEER CONNECTIONS
 
 function createPeerConnection(peerId, initiator) {
   if (peerConnections.has(peerId)) return peerConnections.get(peerId);
@@ -244,7 +404,6 @@ function createPeerConnection(peerId, initiator) {
   };
 
   peer.ontrack = (event) => {
-    console.log("ontrack from", peerId);
     let stream = remoteStreams.get(peerId);
     if (!stream) {
       stream = new MediaStream();
@@ -253,16 +412,12 @@ function createPeerConnection(peerId, initiator) {
       addVideoElement(peerId, stream, label);
     }
     event.streams[0].getTracks().forEach(track => {
-      if (!stream.getTracks().find(t => t.id === track.id)) {
-        stream.addTrack(track);
-      }
+      if (!stream.getTracks().find(t => t.id === track.id)) stream.addTrack(track);
     });
-    // A video track arriving means cam is on
     if (event.track.kind === "video") setTileCamState(peerId, true);
   };
 
   peer.onconnectionstatechange = () => {
-    console.log(`peer ${peerId}:`, peer.connectionState);
     if (["disconnected", "failed", "closed"].includes(peer.connectionState)) {
       peer.close();
       peerConnections.delete(peerId);
@@ -272,17 +427,12 @@ function createPeerConnection(peerId, initiator) {
     }
   };
 
-  if (localStream) {
-    localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
-  }
+  if (localStream) localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
 
   if (initiator) {
     peer.createOffer()
       .then(offer => peer.setLocalDescription(offer))
-      .then(() => {
-        websocket.send(JSON.stringify({ type: "offer", offer: peer.localDescription, to: peerId }));
-        console.log("offer sent to", peerId);
-      })
+      .then(() => websocket.send(JSON.stringify({ type: "offer", offer: peer.localDescription, to: peerId })))
       .catch(console.error);
   }
 
@@ -293,12 +443,10 @@ function createPeerConnection(peerId, initiator) {
 
 websocket.addEventListener("open", () => {
   websocket.send(JSON.stringify({ type: "register", role, id: userId, name: userName }));
-  console.log("registered as", role, userId);
 });
 
 websocket.addEventListener("message", async (e) => {
   const data = JSON.parse(e.data);
-  console.log("received:", data.type, "from:", data.from || data.peerId || "server");
 
   if (data.type === "room_state") {
     for (const peer of data.peers) {
@@ -330,9 +478,7 @@ websocket.addEventListener("message", async (e) => {
     try {
       const peer = peerConnections.get(data.from);
       if (peer) await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
-    } catch (err) {
-      console.error("ICE error:", err);
-    }
+    } catch (err) { console.error("ICE error:", err); }
   }
 
   if (data.type === "peer_left") {
@@ -367,25 +513,23 @@ async function setup() {
   }
 
   updateParticipantCount();
+  layoutTiles();
 
   websocket.send(JSON.stringify({ type: "client_ready", id: userId, name: userName }));
-  console.log(role, "ready");
 }
 
-websocket.addEventListener("open", () => {
-  setTimeout(setup, 100);
-});
+websocket.addEventListener("open", () => setTimeout(setup, 100));
 
 // CHAT
 
 function sendMessage() {
-  const chatInput = document.getElementById("chatInput");
-  if (!chatInput.value.trim()) return;
-  websocket.send(JSON.stringify({ type: "mesg", mesg: chatInput.value, name: userName, id: userId }));
-  chatInput.value = "";
+  const input = document.getElementById("chatInput");
+  if (!input.value.trim()) return;
+  websocket.send(JSON.stringify({ type: "mesg", mesg: input.value, name: userName, id: userId }));
+  input.value = "";
 }
 
-document.getElementById("chatInput")?.addEventListener("keydown", (e) => {
+document.getElementById("chatInput")?.addEventListener("keydown", e => {
   if (e.key === "Enter") sendMessage();
 });
 
@@ -403,7 +547,6 @@ document.getElementById("videoBtn")?.addEventListener("click", () => {
   videoEnabled = !videoEnabled;
   localStream.getVideoTracks().forEach(t => (t.enabled = videoEnabled));
   document.getElementById("videoBtn").innerHTML = `Cam <b>${videoEnabled ? "On" : "Off"}</b>`;
-  // Toggle own local tile
   setTileCamState("local", videoEnabled);
 });
 
@@ -423,117 +566,70 @@ document.getElementById("leaveBtn")?.addEventListener("click", () => {
 
 // SCREEN SHARE
 
-const screenPeerId = "screen-" + userId;
-
 document.getElementById("presentBtn")?.addEventListener("click", async () => {
-  if (screenStream) {
-    stopPresenting();
-    return;
-  }
+  if (screenStream) { stopPresenting(); return; }
 
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: "always" },
-      audio: false
-    });
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false });
+    screenPeerId = "screen-" + userId;
 
-    enterPresentingLayout(screenStream);
+    // Add screen tile into the grid area
+    const area = document.getElementById("gridArea");
+    const wrapper = document.createElement("div");
+    wrapper.id = `wrapper-${screenPeerId}`;
+    wrapper.className = "video-wrapper";
+    const vid = document.createElement("video");
+    vid.srcObject = screenStream;
+    vid.autoplay = true;
+    vid.playsInline = true;
+    vid.muted = true;
+    const lbl = document.createElement("span");
+    lbl.className = "video-label";
+    lbl.textContent = `${userName} (screen)`;
+    wrapper.appendChild(vid);
+    wrapper.appendChild(lbl);
+    area.insertBefore(wrapper, area.firstChild); // screen first so layout puts it left/top
+    vid.play().catch(console.error);
 
     for (const [peerId, peer] of peerConnections) {
-      const screenTrack = screenStream.getVideoTracks()[0];
       const sender = peer.getSenders().find(s => s.track?.kind === "video");
-      if (sender) sender.replaceTrack(screenTrack);
+      if (sender) sender.replaceTrack(screenStream.getVideoTracks()[0]);
     }
 
     document.getElementById("presentBtn").innerHTML = "Stop";
     document.getElementById("presentBtn").classList.add("presenting-active");
 
+    layoutTiles();
+
     screenStream.getVideoTracks()[0].addEventListener("ended", stopPresenting);
 
   } catch (err) {
-    if (err.name !== "NotAllowedError") console.error("getDisplayMedia error:", err);
+    if (err.name !== "NotAllowedError") console.error("getDisplayMedia:", err);
     screenStream = null;
+    screenPeerId = null;
   }
 });
 
-function enterPresentingLayout(stream) {
-  const gridArea = document.getElementById("gridArea");
-  const videoGrid = document.getElementById("videoGrid");
-
-  gridArea.classList.add("presenting");
-
-  // Screen tile
-  const screenWrapper = document.createElement("div");
-  screenWrapper.id = `wrapper-${screenPeerId}`;
-  screenWrapper.className = "video-wrapper screen-tile";
-  const screenVideo = document.createElement("video");
-  screenVideo.id = `video-${screenPeerId}`;
-  screenVideo.srcObject = stream;
-  screenVideo.autoplay = true;
-  screenVideo.playsInline = true;
-  screenVideo.muted = true;
-  const screenLabel = document.createElement("span");
-  screenLabel.className = "video-label";
-  screenLabel.textContent = `${userName} (screen)`;
-  screenWrapper.appendChild(screenVideo);
-  screenWrapper.appendChild(screenLabel);
-  gridArea.insertBefore(screenWrapper, videoGrid);
-  screenVideo.play().catch(console.error);
-
-  // Participant strip
-  const strip = document.createElement("div");
-  strip.id = "participantStrip";
-  strip.className = "participant-strip";
-
-  // Move all existing remote tiles into the strip
-  const tiles = videoGrid.querySelectorAll(".video-wrapper");
-  tiles.forEach(t => strip.appendChild(t));
-
-  // Move local tile into strip too
-  const localWrapper = document.getElementById("wrapper-local");
-  if (localWrapper) strip.appendChild(localWrapper);
-
-  gridArea.appendChild(strip);
-}
-
-function exitPresentingLayout() {
-  const gridArea = document.getElementById("gridArea");
-  const videoGrid = document.getElementById("videoGrid");
-  const strip = document.getElementById("participantStrip");
-
-  // Move tiles back to videoGrid
-  if (strip) {
-    const tiles = strip.querySelectorAll(".video-wrapper");
-    tiles.forEach(t => {
-      if (t.id === "wrapper-local") {
-        // local goes back before videoGrid
-        gridArea.insertBefore(t, videoGrid);
-      } else {
-        videoGrid.appendChild(t);
-      }
-    });
-    strip.remove();
-  }
-
-  removeVideoElement(screenPeerId);
-  gridArea.classList.remove("presenting");
-}
-
 function stopPresenting() {
   if (!screenStream) return;
+
   screenStream.getTracks().forEach(t => t.stop());
   screenStream = null;
 
-  exitPresentingLayout();
+  const wrapper = document.getElementById(`wrapper-${screenPeerId}`);
+  if (wrapper) wrapper.remove();
+  screenPeerId = null;
 
   if (localStream) {
-    const cameraTrack = localStream.getVideoTracks()[0];
-    for (const [peerId, peer] of peerConnections) {
+    const cam = localStream.getVideoTracks()[0];
+    for (const [, peer] of peerConnections) {
       const sender = peer.getSenders().find(s => s.track?.kind === "video");
-      if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
+      if (sender && cam) sender.replaceTrack(cam);
     }
   }
 
   document.getElementById("presentBtn").innerHTML = "Present";
   document.getElementById("presentBtn").classList.remove("presenting-active");
+
+  layoutTiles();
 }

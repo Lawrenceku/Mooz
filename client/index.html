@@ -18,9 +18,12 @@
       <div class="grid-area" id="gridArea">
         <div class="video-wrapper" id="wrapper-local">
           <video id="localVideo" autoplay playsinline muted></video>
+          <div class="cam-off-placeholder">
+            <div class="cam-avatar" id="localAvatar"></div>
+            <span id="localAvatarName"></span>
+          </div>
           <span class="video-label">You</span>
         </div>
-        <div id="videoGrid"></div>
       </div>
 
       <div class="controls-container">
@@ -48,5 +51,14 @@
   </div>
 
   <script src="index.js"></script>
+  <script>
+    // Set local avatar color + initial after userName is known
+    const _name = localStorage.getItem("name") || "User";
+    const _colors = ["#e74c6f","#e7a23c","#3ca9e7","#8c3ce7","#3ce76f","#e7563c","#3ce7d4"];
+    let _h = 0; for (let i = 0; i < _name.length; i++) _h = (_h * 31 + _name.charCodeAt(i)) >>> 0;
+    document.getElementById("localAvatar").style.background = _colors[_h % _colors.length];
+    document.getElementById("localAvatar").textContent = _name[0].toUpperCase();
+    document.getElementById("localAvatarName").textContent = _name;
+  </script>
 </body>
 </html>
