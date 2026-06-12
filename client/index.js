@@ -436,3 +436,74 @@ document.getElementById("leaveBtn")?.addEventListener("click", () => {
   websocket.close();
   window.location.href = "./connect.html";
 });
+
+// SCREEN SHARE / PRESENTATION
+
+let screenStream = null;
+let screenPeerId = "screen-" + userId; // unique id for the screen share tile
+
+document.getElementById("presentBtn")?.addEventListener("click", async () => {
+  // If already presenting, stop
+  if (screenStream) {
+    stopPresenting();
+    return;
+  }
+
+  try {
+    // Browser native picker — user chooses window, tab, or entire screen
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { cursor: "always" },
+      audio: false
+    });
+
+    // Show our own screen share locally so we can confirm it's working
+    addVideoElement(screenPeerId, screenStream, `${userName} (screen)`);
+
+    // Replace the video track on every existing peer connection
+    for (const [peerId, peer] of peerConnections) {
+      const screenTrack = screenStream.getVideoTracks()[0];
+      const sender = peer.getSenders().find(s => s.track?.kind === "video");
+      if (sender) {
+        sender.replaceTrack(screenTrack);
+      }
+    }
+
+    document.getElementById("presentBtn").innerHTML = "Stop Presenting";
+
+    // When user clicks the browser's native "Stop sharing" button
+    screenStream.getVideoTracks()[0].addEventListener("ended", () => {
+      stopPresenting();
+    });
+
+  } catch (err) {
+    // User cancelled the picker or permission denied — not an error worth surfacing
+    if (err.name !== "NotAllowedError") {
+      console.error("getDisplayMedia error:", err);
+    }
+    screenStream = null;
+  }
+});
+
+function stopPresenting() {
+  if (!screenStream) return;
+
+  // Stop all screen tracks
+  screenStream.getTracks().forEach(t => t.stop());
+  screenStream = null;
+
+  // Remove our local screen tile
+  removeVideoElement(screenPeerId);
+
+  // Swap back to camera on every peer connection
+  if (localStream) {
+    const cameraTrack = localStream.getVideoTracks()[0];
+    for (const [peerId, peer] of peerConnections) {
+      const sender = peer.getSenders().find(s => s.track?.kind === "video");
+      if (sender && cameraTrack) {
+        sender.replaceTrack(cameraTrack);
+      }
+    }
+  }
+
+  document.getElementById("presentBtn").innerHTML = "Present";
+}
