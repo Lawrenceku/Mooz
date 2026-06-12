@@ -134,19 +134,15 @@ const role = localStorage.getItem("role");
 const userId = localStorage.getItem("user");
 const userName = localStorage.getItem("name") || "User";
 
-// Admin: one RTCPeerConnection per client { clientId -> pc }
-const peerConnections = new Map();
-const remoteStreams = new Map();
-const clientNames = new Map(); // clientId -> display name
+// All roles use the same maps now — full mesh topology
+const peerConnections = new Map(); // peerId -> RTCPeerConnection
+const remoteStreams = new Map();   // peerId -> MediaStream
+const peerNames = new Map();       // peerId -> display name
 
-// Client: single pc to admin
-let pc = null;
 let localStream = null;
-
 let audioEnabled = true;
 let videoEnabled = true;
 
-// ICE config with TURN fallback for production NAT traversal
 const ICE_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -163,16 +159,18 @@ const ICE_CONFIG = {
   ]
 };
 
-function addVideoElement(clientId, stream, label) {
-  if (document.getElementById(`wrapper-${clientId}`)) return;
+// VIDEO GRID
+
+function addVideoElement(peerId, stream, label) {
+  if (document.getElementById(`wrapper-${peerId}`)) return;
 
   const grid = document.getElementById("videoGrid");
   const wrapper = document.createElement("div");
-  wrapper.id = `wrapper-${clientId}`;
+  wrapper.id = `wrapper-${peerId}`;
   wrapper.className = "video-wrapper";
 
   const video = document.createElement("video");
-  video.id = `video-${clientId}`;
+  video.id = `video-${peerId}`;
   video.srcObject = stream;
   video.autoplay = true;
   video.playsInline = true;
@@ -180,7 +178,7 @@ function addVideoElement(clientId, stream, label) {
 
   const nameTag = document.createElement("span");
   nameTag.className = "video-label";
-  nameTag.textContent = label || clientId.slice(0, 6);
+  nameTag.textContent = label || peerId.slice(0, 6);
 
   wrapper.appendChild(video);
   wrapper.appendChild(nameTag);
@@ -190,8 +188,8 @@ function addVideoElement(clientId, stream, label) {
   updateParticipantCount();
 }
 
-function removeVideoElement(clientId) {
-  const wrapper = document.getElementById(`wrapper-${clientId}`);
+function removeVideoElement(peerId) {
+  const wrapper = document.getElementById(`wrapper-${peerId}`);
   if (wrapper) wrapper.remove();
   updateParticipantCount();
 }
@@ -202,35 +200,35 @@ function updateParticipantCount() {
 }
 
 // PEER CONNECTION FACTORY
+// initiator=true means WE send the offer; initiator=false means we wait for their offer
 
-function createPeerConnection(remoteId) {
+function createPeerConnection(peerId, initiator) {
+  // Don't create duplicate connections
+  if (peerConnections.has(peerId)) return peerConnections.get(peerId);
+
   const peer = new RTCPeerConnection(ICE_CONFIG);
+  peerConnections.set(peerId, peer);
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
       websocket.send(JSON.stringify({
         type: "ice",
         candidate: event.candidate,
-        to: remoteId
+        to: peerId
       }));
     }
   };
 
-  // Unified ontrack — works for both admin (many clients) and client (sees everyone)
   peer.ontrack = (event) => {
-    console.log("ontrack from", remoteId);
-    let stream = remoteStreams.get(remoteId);
+    console.log("ontrack from", peerId);
+    let stream = remoteStreams.get(peerId);
     if (!stream) {
       stream = new MediaStream();
-      remoteStreams.set(remoteId, stream);
-      // Admin sees client names; client sees "Host" for admin, username for peers
-      const label = remoteId === "admin"
-        ? "Host"
-        : (clientNames.get(remoteId) || remoteId.slice(0, 6));
-      addVideoElement(remoteId, stream, label);
+      remoteStreams.set(peerId, stream);
+      const label = peerNames.get(peerId) || peerId.slice(0, 6);
+      addVideoElement(peerId, stream, label);
     }
     event.streams[0].getTracks().forEach(track => {
-      // Avoid duplicate tracks
       if (!stream.getTracks().find(t => t.id === track.id)) {
         stream.addTrack(track);
       }
@@ -238,20 +236,40 @@ function createPeerConnection(remoteId) {
   };
 
   peer.onconnectionstatechange = () => {
-    console.log(`peer ${remoteId}:`, peer.connectionState);
+    console.log(`peer ${peerId}:`, peer.connectionState);
     if (["disconnected", "failed", "closed"].includes(peer.connectionState)) {
       peer.close();
-      peerConnections.delete(remoteId);
-      remoteStreams.delete(remoteId);
-      clientNames.delete(remoteId);
-      removeVideoElement(remoteId);
+      peerConnections.delete(peerId);
+      remoteStreams.delete(peerId);
+      peerNames.delete(peerId);
+      removeVideoElement(peerId);
     }
   };
+
+  // Add our local tracks to the connection
+  if (localStream) {
+    localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+  }
+
+  // If we're the initiator, create and send an offer
+  if (initiator) {
+    peer.createOffer()
+      .then(offer => peer.setLocalDescription(offer))
+      .then(() => {
+        websocket.send(JSON.stringify({
+          type: "offer",
+          offer: peer.localDescription,
+          to: peerId
+        }));
+        console.log("offer sent to", peerId);
+      })
+      .catch(console.error);
+  }
 
   return peer;
 }
 
-// Websocket
+// WEBSOCKET
 
 websocket.addEventListener("open", () => {
   websocket.send(JSON.stringify({
@@ -260,92 +278,96 @@ websocket.addEventListener("open", () => {
     id: userId,
     name: userName
   }));
-  console.log("registered as", role);
-  role === "admin" ? setupAdmin() : joinRoom();
+  console.log("registered as", role, userId);
 });
 
 websocket.addEventListener("message", async (e) => {
   const data = JSON.parse(e.data);
-  console.log("received:", data.type, "from:", data.from || data.clientId);
+  console.log("received:", data.type, "from:", data.from || data.peerId || "server");
 
-  // Admin: client has tracks ready — create a dedicated pc and send offer
-  if (data.type === "client_ready") {
-    if (role !== "admin") return;
-
-    // Store the client's name so the tile label is correct when ontrack fires
-    if (data.name) clientNames.set(data.clientId, data.name);
-
-    const peer = createPeerConnection(data.clientId);
-    peerConnections.set(data.clientId, peer);
-
-    if (localStream) {
-      localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+  // After register+getUserMedia, server sends us the current room participants
+  if (data.type === "room_state") {
+    console.log("room_state: existing peers =", data.peers.map(p => p.name));
+    for (const peer of data.peers) {
+      peerNames.set(peer.id, peer.name);
+      // We initiate the offer to every existing peer (they wait for us)
+      createPeerConnection(peer.id, true);
     }
-
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-
-    websocket.send(JSON.stringify({
-      type: "offer",
-      offer: peer.localDescription,
-      to: data.clientId
-    }));
-
-    console.log("offer sent to", data.clientId);
   }
 
-  // Client: receives offer from admin
+  // Someone new joined — they will send us an offer, so we just note their name
+  if (data.type === "peer_joined") {
+    console.log("peer_joined:", data.name, data.peerId);
+    peerNames.set(data.peerId, data.name);
+    // Do NOT initiate here — the new peer initiates to us via room_state
+  }
+
+  // Received an offer from another peer — answer it
   if (data.type === "offer") {
-    if (role !== "client") return;
-    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    console.log("offer from", data.from);
+    if (data.name) peerNames.set(data.from, data.name);
+
+    // createPeerConnection with initiator=false (we answer, don't offer)
+    const peer = createPeerConnection(data.from, false);
+
+    await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
 
     websocket.send(JSON.stringify({
       type: "answer",
-      answer: pc.localDescription,
+      answer: peer.localDescription,
       to: data.from
     }));
   }
 
-  // Admin: receives answer from a specific client
+  // Received an answer to our offer
   if (data.type === "answer") {
-    if (role !== "admin") return;
+    console.log("answer from", data.from);
     const peer = peerConnections.get(data.from);
     if (peer) await peer.setRemoteDescription(new RTCSessionDescription(data.answer));
   }
 
-  // Both: ICE candidates
+  // ICE candidate from any peer
   if (data.type === "ice") {
     if (!data.candidate) return;
     try {
-      if (role === "admin") {
-        const peer = peerConnections.get(data.from);
-        if (peer) await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
-      } else {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
+      const peer = peerConnections.get(data.from);
+      if (peer) await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
     } catch (err) {
       console.error("ICE error:", err);
     }
   }
 
-  // Admin: a client disconnected
-  if (data.type === "client_left") {
-    const peer = peerConnections.get(data.clientId);
+  // A peer disconnected
+  if (data.type === "peer_left") {
+    const peer = peerConnections.get(data.peerId);
     if (peer) {
       peer.close();
-      peerConnections.delete(data.clientId);
+      peerConnections.delete(data.peerId);
     }
-    remoteStreams.delete(data.clientId);
-    clientNames.delete(data.clientId);
-    removeVideoElement(data.clientId);
+    remoteStreams.delete(data.peerId);
+    peerNames.delete(data.peerId);
+    removeVideoElement(data.peerId);
+  }
+
+  // Chat message
+  if (data.type === "mesg") {
+    const container = document.getElementById("chatMessages");
+    const msg = document.createElement("div");
+    const name = document.createElement("b");
+    name.textContent = data.name + ": ";
+    msg.appendChild(name);
+    msg.appendChild(document.createTextNode(data.mesg));
+    container.appendChild(msg);
+    container.scrollTop = container.scrollHeight;
+    console.log("chat from", data.name);
   }
 });
 
-// ADMIN
+// SETUP — get media first, then send client_ready
 
-async function setupAdmin() {
+async function setup() {
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
 
   const localVideo = document.getElementById("localVideo");
@@ -355,31 +377,37 @@ async function setupAdmin() {
   }
 
   updateParticipantCount();
-  console.log("admin ready, waiting for clients...");
-}
 
-// CLIENT
-
-async function joinRoom() {
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-  const localVideo = document.getElementById("localVideo");
-  if (localVideo) {
-    localVideo.srcObject = localStream;
-    localVideo.play().catch(console.error);
-  }
-
-  pc = createPeerConnection("admin");
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
+  // Now that we have media, announce ourselves so room_state comes back
+  // with peers we can immediately connect to
   websocket.send(JSON.stringify({
     type: "client_ready",
     id: userId,
     name: userName
   }));
 
-  updateParticipantCount();
-  console.log("client ready, waiting for offer...");
+  console.log(role, "ready");
+}
+
+// Wait for websocket open before getting media, but only run setup once
+websocket.addEventListener("open", () => {
+  // Small delay to ensure register message is processed first
+  setTimeout(setup, 100);
+});
+
+// CHAT
+
+function sendMessage() {
+  const chatInput = document.getElementById("chatInput");
+  if (!chatInput.value.trim()) return;
+
+  websocket.send(JSON.stringify({
+    type: "mesg",
+    mesg: chatInput.value,
+    name: userName,
+    id: userId
+  }));
+  chatInput.value = "";
 }
 
 // CONTROLS

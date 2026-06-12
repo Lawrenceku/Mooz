@@ -34,11 +34,11 @@
     <div class="chat-container" id="chatContainer">
       <div class="chat-header"><b>Chat</b></div>
       <div class="chat-messages" id="chatMessages">
-        <div><b>Name:</b> Message</div>
+        <div id="chat-message"><b id="chat-name"></b></div>
       </div>
       <div class="chat-input">
         <input type="text" id="chatInput" placeholder="Type your message" />
-        <button class="btn">Send</button>
+        <button onclick="sendMessage()" class="btn">Send</button>
       </div>
     </div>
   </div>

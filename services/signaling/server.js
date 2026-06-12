@@ -1,114 +1,3 @@
-//DEPRECATED
-
-// const express = require("express");
-// const app = express();
-// // Initializes express-ws
-// const socket = require("express-ws")(app); 
-// let users = new Map();
-
-// let admin = null;
-
-// app.use(function(req, res, next){
-//     console.log("middleware");
-//     req.testing = "testing";
-//     return next();
-// });
-
-// app.get("/", function(req, res, next){
-//     console.log("hello " + req.testing);
-//     res.end();
-// });
-
-// app.ws('/', function(ws, req) {
-//     console.log('socket', req.testing);
-//     ws.id = randomUUID();
-
-//     ws.on("connect", ()=>{
-//         ws.id = null;
-//         ws.role = "client" //defualt role
-
-//         //all messages
-//         ws.on("message", (msg)=>{
-//         let data = JSON.parse(msg)
-
-//         //register
-
-//         if (data.type == "register"){
-//             ws.id = data.id
-//             ws.role = data.role 
-//             users.set(ws.id, ws);
-
-//             if(ws.role == "admin"){
-//                 admin = ws.id
-//             }
-//             console.log(admin == ws.id? `registered admin`: `registered user`)
-//         return
-//         }
-
-//         //offer
-//         if (data.type == "offer"){
-//             let target = users.get(data.to)
-//             for (const [id, user] of users){
-//                 if(user.role == "client"){
-//                     target.send(JSON.stringify(
-//                      {
-//                         type: "offer",
-//                         offer: data.offer,
-//                         from: ws.id
-//                     }))
-//                     }  
-//             }}
-
-//         //answer
-// if (data.type === "answer") {
-//     const target = users.get(data.to);
-
-//     if (target) {
-//         target.send(JSON.stringify({
-//             type: "answer",
-//             answer: data.answer,
-//             from: ws.id
-//         }));
-//     }
-//     return;
-// }
-
-        
-
-//         //ice candidate
-//         if( data.type == "ice"){
-//             let target = users.get(data.to)
-//             if(users.get(data.to)){
-//                 target.send(JSON.stringify({
-//                     type: "ice",           
-//                     candidate: data.candidate,
-//                      from: ws.id
-//                 }))
-//             }
-
-//             console.log("ice")
-
-//             return;
-//         }
-
-//         })
-
-
-//     })
-
-//     ws.on("close", ()=>{
-//         if(ws.id){
-//             users.delete(ws.id)
-//         }
-//         if(ws.id == admin){
-//             admin = null;
-//         }
-//     })
-// });
-
-
-// app.listen(3000, () => console.log("Server live on 3000"));
-
 const express = require("express");
 const http = require("http");
 const { randomUUID } = require("crypto");
@@ -116,10 +5,10 @@ const { randomUUID } = require("crypto");
 const app = express();
 const server = http.createServer(app);
 
-// attach websocket to HTTP server (important for deployment stability)
 require("express-ws")(app, server);
-let users = new Map(); // userId map to ws
-let admin = null;      // admin userId
+
+let users = new Map(); // userId -> ws
+let admin = null;
 
 app.use(function (req, res, next) {
   req.testing = "testing";
@@ -148,7 +37,7 @@ app.ws("/ws", function (ws, req) {
     if (data.type === "register") {
       ws.id = data.id;
       ws.role = data.role;
-      ws.name = data.name || "User"; // store name on socket
+      ws.name = data.name || "User";
       users.set(ws.id, ws);
 
       if (ws.role === "admin") {
@@ -160,42 +49,58 @@ app.ws("/ws", function (ws, req) {
       return;
     }
 
-    // client ready: tell admin (forward name so admin can label the tile)
+    // client ready: send new client the room state, tell everyone else they joined
     if (data.type === "client_ready") {
-      ws.name = data.name || ws.name || "User"; // update name if provided
-      const adminSocket = users.get(admin);
-      if (adminSocket) {
-        adminSocket.send(JSON.stringify({
-          type: "client_ready",
-          clientId: ws.id,
-          name: ws.name  // forwarded so admin can set video label before ontrack fires
-        }));
-        console.log("notified admin: client ready", ws.id, ws.name);
-      } else {
-        // No admin yet — tell the client
-        ws.send(JSON.stringify({ type: "error", message: "No admin in room yet" }));
-        console.log("client_ready but no admin connected");
+      ws.name = data.name || ws.name || "User";
+
+      // Build list of everyone already in the room (excluding this new client)
+      const existingPeers = [];
+      for (const [id, user] of users) {
+        if (id !== ws.id) {
+          existingPeers.push({ id, name: user.name, role: user.role });
+        }
       }
+
+      // Tell the new client who is already here so it can initiate peer connections
+      ws.send(JSON.stringify({
+        type: "room_state",
+        peers: existingPeers
+      }));
+
+      // Tell everyone else a new peer joined
+      for (const [id, user] of users) {
+        if (id !== ws.id) {
+          user.send(JSON.stringify({
+            type: "peer_joined",
+            peerId: ws.id,
+            name: ws.name,
+            role: ws.role
+          }));
+        }
+      }
+
+      console.log("client_ready:", ws.id, ws.name, "| notified", existingPeers.length, "peers");
       return;
     }
 
-    // offer: admin → specific client
+    // offer: route to specific target (any peer -> any peer)
     if (data.type === "offer") {
       const target = users.get(data.to);
       if (target) {
         target.send(JSON.stringify({
           type: "offer",
           offer: data.offer,
-          from: ws.id
+          from: ws.id,
+          name: ws.name
         }));
-        console.log("offer forwarded to", data.to);
+        console.log("offer forwarded", ws.id, "->", data.to);
       } else {
         console.log("offer target not found:", data.to);
       }
       return;
     }
 
-    // answer: client → admin
+    // answer: route to specific target
     if (data.type === "answer") {
       const target = users.get(data.to);
       if (target) {
@@ -204,12 +109,12 @@ app.ws("/ws", function (ws, req) {
           answer: data.answer,
           from: ws.id
         }));
-        console.log("answer forwarded to", data.to);
+        console.log("answer forwarded", ws.id, "->", data.to);
       }
       return;
     }
 
-    // ice: route by real ID, resolve "admin" string
+    // ice: route by real ID, resolve "admin" alias
     if (data.type === "ice") {
       const toId = data.to === "admin" ? admin : data.to;
       const target = users.get(toId);
@@ -221,6 +126,21 @@ app.ws("/ws", function (ws, req) {
         }));
       }
       console.log("ice forwarded to", toId);
+      return;
+    }
+
+    // chat: broadcast to everyone in the room
+    if (data.type === "mesg") {
+      const outbound = JSON.stringify({
+        type: "mesg",
+        mesg: data.mesg,
+        name: ws.name || data.name || "User",
+        from: ws.id
+      });
+      for (const [id, user] of users) {
+        user.send(outbound);
+      }
+      console.log("chat broadcast from", ws.id, ws.name);
       return;
     }
   });
@@ -235,12 +155,11 @@ app.ws("/ws", function (ws, req) {
         console.log("admin left");
       }
 
-      // Notify admin that a client left so it can clean up the video tile
-      const adminSocket = users.get(admin);
-      if (adminSocket && ws.role === "client") {
-        adminSocket.send(JSON.stringify({
-          type: "client_left",
-          clientId: ws.id
+      // Notify everyone that this peer left
+      for (const [id, user] of users) {
+        user.send(JSON.stringify({
+          type: "peer_left",
+          peerId: ws.id
         }));
       }
     }
