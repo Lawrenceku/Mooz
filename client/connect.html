@@ -51,7 +51,7 @@
     </div>
 
     <script>
-      const userId = crypto.randomUUID();
+      const userId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
       const connectForm = document.getElementById('connectForm');
       const nameInput = document.getElementById('nameInput');
       const roomInput = document.getElementById('roomInput');
@@ -80,7 +80,7 @@
       }
 
       function createRoomId() {
-        return crypto.randomUUID().slice(0, 8).toLowerCase();
+        return (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID().slice(0, 8).toLowerCase() : Math.random().toString(36).substring(2, 10);
       }
 
       function goToMeeting(role) {
