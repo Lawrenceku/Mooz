@@ -1,0 +1,42 @@
+{
+  "name": "mooz",
+  "version": "1.0.0",
+  "description": "Video conferencing application",
+  "private": true,
+  "packageManager": "npm@11.2.0",
+  "workspaces": [
+    "client",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky || true",
+    "dev": "node scripts/dev.js",
+    "dev:turbo": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "lint:fix": "prettier . --write"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lawrenceku/Mooz.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Lawrenceku/Mooz/issues"
+  },
+  "homepage": "https://github.com/Lawrenceku/Mooz#readme",
+  "devDependencies": {
+    "http-server": "^14.1.1",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.4",
+    "turbo": "^2.9.18"
+  },
+  "lint-staged": {
+    "*.{js,html,css,json}": "node scripts/prettier-staged.js"
+  }
+}

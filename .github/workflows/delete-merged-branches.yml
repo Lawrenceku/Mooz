@@ -1,0 +1,36 @@
+name: Delete branch on merged PR
+on: 
+  pull_request:
+    types: [closed]
+
+jobs:
+  if_merged:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+    - run: |
+        echo "The PR was merged"
+    
+  delete-branch:
+    if: >   # this repo or from another forked repo 
+      github.event.pull_request.merged == true &&   
+      github.event.pull_request.head.repo.full_name == github.repository 
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  #  write access
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4  # Ensure repo is available for Git commands
+
+      - name: Delete branch if not 'main' or 'develop'
+        run: |
+          source_branch=$(jq --raw-output .pull_request.head.ref "$GITHUB_EVENT_PATH")
+
+          if [[ "$source_branch" != "main" && "$source_branch" != "develop" ]]; then
+            echo "Deleting branch: $source_branch"
+            git config --global user.email "github-actions@github.com"
+            git config --global user.name "GitHub Actions"
+            git push origin --delete "$source_branch"
+          else
+            echo "Branch $source_branch is not deleted since it's 'main' or 'develop'."
+          fi

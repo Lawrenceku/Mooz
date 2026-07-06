@@ -1,49 +1,143 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>  
+  <head>
     <title>Mooz</title>
     <link rel="stylesheet" href="style.css" />
-</head>
+  </head>
 
-<body>
-    <header class="top-bar">
+  <body>
+    <div class="connect-shell">
+      <header class="top-bar connect-top-bar">
         <h1><span class="logo-m">M</span>ooz</h1>
-    </header>
-    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);">
-                <form onsubmit="setRole()" action="">
-                    <input required style="display: block; width: 30vw; margin:10px;" placeholder="Enter your name before clicking join" id="input" type="text">
-                    <button type="submit" class="btn">Create</button>
-                    <button type="submit" class="btn">Join Call</button>
-                </form>
+      </header>
 
+      <main class="connect-card">
+        <form class="connect-form" id="connectForm" onsubmit="return false;">
+          <label>
+            Name
+            <input
+              required
+              id="nameInput"
+              type="text"
+              placeholder="Enter your name"
+            />
+          </label>
+
+          <label>
+            Meeting code
+            <input
+              id="roomInput"
+              type="text"
+              placeholder="Enter a room code or paste a meeting link"
+            />
+          </label>
+
+          <div class="connect-actions">
+            <button type="button" class="btn" id="createBtn">
+              New meeting
+            </button>
+            <button type="button" class="btn" id="joinBtn">Join meeting</button>
+          </div>
+
+          <div class="connect-footer">
+            <label class="debug-checkbox">
+              <input id="debugInput" type="checkbox" />
+              Show performance metrics during the meeting
+            </label>
+            <div class="connect-hint" id="roomHint"></div>
+          </div>
+        </form>
+      </main>
     </div>
 
     <script>
-        
-        let userId = crypto.randomUUID()
-        let role = null;
+      const userId = crypto.randomUUID();
+      const connectForm = document.getElementById('connectForm');
+      const nameInput = document.getElementById('nameInput');
+      const roomInput = document.getElementById('roomInput');
+      const debugInput = document.getElementById('debugInput');
+      const roomHint = document.getElementById('roomHint');
 
-        const myInput = document.getElementById('input');
+      function normalizeRoomId(value) {
+        return value
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-+|-+$/g, '');
+      }
 
-        
-
-        function setRole(){
-            event.preventDefault()
-            if ( myInput.value == "Kagos123"){
-                localStorage.setItem("user", userId)
-                localStorage.setItem("role", "admin");
-                localStorage.setItem("name", "Hicon Resources")
-                window.location.href = "./index.html"
-            }
-            else {
-                localStorage.setItem("user", userId)
-                localStorage.setItem("role", "client")
-                localStorage.setItem("name", myInput.value)
-                 window.location.href = "./index.html"
-            }
+      function resolveRoomValue(value) {
+        try {
+          const url = new URL(value, window.location.href);
+          const roomFromQuery = url.searchParams.get('room');
+          if (roomFromQuery) return roomFromQuery;
+        } catch (error) {
+          // Treat non-URL text as a room id.
         }
-        
-</script>
 
-</body>
+        return value;
+      }
+
+      function createRoomId() {
+        return crypto.randomUUID().slice(0, 8).toLowerCase();
+      }
+
+      function goToMeeting(role) {
+        if (!nameInput.reportValidity()) return;
+
+        const name = nameInput.value.trim();
+        const debugEnabled = debugInput.checked;
+        const roomValue = resolveRoomValue(roomInput.value);
+        const roomId =
+          role === 'admin' ? createRoomId() : normalizeRoomId(roomValue);
+
+        if (role === 'client') {
+          if (!roomInput.reportValidity() || !roomId) {
+            roomInput.setCustomValidity('Enter a meeting code to join.');
+            roomInput.reportValidity();
+            roomInput.setCustomValidity('');
+            return;
+          }
+        }
+
+        if (!roomId || !name) return;
+
+        localStorage.setItem('user', userId);
+        localStorage.setItem('role', role);
+        localStorage.setItem('name', name);
+        localStorage.setItem('roomId', roomId);
+        sessionStorage.setItem('meetingDebugEnabled', String(debugEnabled));
+        sessionStorage.removeItem('meetingMetricsOpen');
+
+        window.location.href = `./index.html?room=${encodeURIComponent(roomId)}`;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const roomFromUrl = params.get('room');
+      if (roomFromUrl) {
+        roomInput.value = roomFromUrl;
+        roomHint.textContent = `Meeting code: ${roomFromUrl}`;
+      }
+
+      debugInput.checked =
+        sessionStorage.getItem('meetingDebugEnabled') === 'true';
+      nameInput.value = localStorage.getItem('name') || '';
+      roomInput.value = roomInput.value || localStorage.getItem('roomId') || '';
+
+      document.getElementById('createBtn').addEventListener('click', () => {
+        goToMeeting('admin');
+      });
+
+      document.getElementById('joinBtn').addEventListener('click', () => {
+        goToMeeting('client');
+      });
+
+      roomInput.addEventListener('input', () => {
+        roomHint.textContent = roomInput.value.trim()
+          ? `Meeting code: ${roomInput.value.trim()}`
+          : '';
+      });
+    </script>
+  </body>
 </html>

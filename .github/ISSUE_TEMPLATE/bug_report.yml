@@ -1,0 +1,61 @@
+name: Bug Report
+description: Something is broken — let us know.
+title: "[bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more detail you give, the faster it gets fixed.
+        Before you continue, please check that this hasn't already been reported in the [open issues](https://github.com/Lawrenceku/Mooz/issues).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you expect to happen, and what actually happened instead?
+      placeholder: "e.g. After ending screen share, my camera feed freezes and the remote peer sees a black screen."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Walk us through how to trigger the bug consistently.
+      placeholder: |
+        1. Open a room with two participants
+        2. Start screen sharing
+        3. Stop screen sharing
+        4. Camera feed freezes
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Tell us about your setup — browser, OS, and anything relevant about your network.
+      placeholder: |
+        - Browser: Chrome 126 / Firefox 127 / Safari 17
+        - OS: macOS 14 / Windows 11 / Ubuntu 24.04
+        - Network: behind NAT / corporate VPN / etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console logs or screenshots (optional)
+      description: Paste any relevant browser console errors here. Screenshots are welcome too.
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open issues and this hasn't been reported yet.
+          required: true
+        - label: I can reproduce this consistently.
+          required: false
